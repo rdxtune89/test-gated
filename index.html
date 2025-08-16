@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Thronedis – Collection Gate (Any Token)</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#0b0f14; color:#e9f0f4; padding:32px; }
+    h2 { margin: 0 0 8px }
+    a { color:#67e8f9; font-weight:600; text-decoration:none }
+    #secret { display:none; margin-top:24px }
+    #locked { margin-top:16px }
+    button { padding:10px 16px; border-radius:10px; border:0; cursor:pointer; background:#2563eb; color:white }
+    .muted { opacity:.75 }
+    code { background:#0f172a; padding:2px 6px; border-radius:6px }
+    .card { background:#0f172a; border:1px solid #1f2937; border-radius:14px; padding:18px; margin-top:20px; }
+  </style>
+</head>
+<body>
+  <h2>🔐 Thronedis – Token Gated (Any token in collection)</h2>
+  <div class="muted">Polygon (137) · Collection: <code>0x76f4E59DBBF99D025B6F1014D33843AB138e4085</code></div>
+
+  <div id="locked" class="card">
+    <p>คุณต้องถือ NFT จากคอลเล็กชันนี้ (ชิ้นใดก็ได้) เพื่อเข้าถึงไฟล์</p>
+    <button id="connect">🔑 Connect Wallet & Verify</button>
+    <p class="muted" style="margin-top:10px;">หากคอลเล็กชันเป็น ERC‑1155 และต้องการให้หลาย tokenId ปลดล็อกได้ ให้ตั้งค่า <code>TOKEN_IDS</code> ในไฟล์นี้</p>
+  </div>
+
+  <div id="secret" class="card">
+    <h3>🎉 คุณมีสิทธิ์เข้าถึงแล้ว</h3>
+    <p><a href="https://ipfs.io/ipfs/bafybeigsrytimlmv4dkz2px7ke4bwco4qj2kgxsdaeaxgmvkubiuexh5cu" target="_blank">📂 ดาวน์โหลดไฟล์จาก IPFS</a></p>
+    <p class="muted">หมายเหตุ: IPFS เป็น public; ใครได้ลิงก์นี้สามารถเปิดได้ หากต้องการความปลอดภัยสูง แนะนำทำ one‑time link ผ่าน backend</p>
+  </div>
+
+  <script>
+    // ===== CONFIG =====
+    const CONTRACT_ADDRESS = "0x76f4E59DBBF99D025B6F1014D33843AB138e4085";
+    const NETWORK_HEX = "0x89"; // Polygon Mainnet
+    // เฉพาะกรณี ERC-1155: หากต้องการให้หลาย tokenId ภายในคอลเล็กชันปลดล็อกได้ ให้กำหนดในลิสต์นี้
+    // ถ้าไม่รู้รายการทั้งหมด แนะนำย้ายตรวจกับ backend
+    const TOKEN_IDS = []; // ตัวอย่าง: ["0","1","2"]
+    // ===================
+
+    // ERC-165 interface ids
+    const IID_ERC721  = "0x80ac58cd";
+    const IID_ERC1155 = "0xd9b67a26";
+
+    // Minimal ABIs
+    const ABI_ERC165  = ["function supportsInterface(bytes4 interfaceId) view returns (bool)"];
+    const ABI_ERC721  = ["function balanceOf(address owner) view returns (uint256)"];
+    const ABI_ERC1155 = ["function balanceOf(address account, uint256 id) view returns (uint256)"];
+
+    async function ensurePolygon() {
+      const chainId = await window.ethereum.request({ method: "eth_chainId" });
+      if (chainId !== NETWORK_HEX) {
+        await window.ethereum.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: NETWORK_HEX }]
+        });
+      }
+    }
+
+    async function detectStandard(provider) {
+      const c165 = new ethers.Contract(CONTRACT_ADDRESS, ABI_ERC165, provider);
+      try {
+        const is721  = await c165.supportsInterface(IID_ERC721);
+        const is1155 = await c165.supportsInterface(IID_ERC1155);
+        if (is1155) return "ERC1155";
+        if (is721)  return "ERC721";
+      } catch {}
+      return "ERC721"; // fallback
+    }
+
+    async function verifyAccess() {
+      if (!window.ethereum) { alert("กรุณาติดตั้ง MetaMask"); return; }
+
+      await ensurePolygon();
+      const [account] = await window.ethereum.request({ method: "eth_requestAccounts" });
+
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer   = provider.getSigner();
+      const standard = await detectStandard(provider);
+
+      let hasAccess = false;
+
+      if (standard === "ERC721") {
+        const c = new ethers.Contract(CONTRACT_ADDRESS, ABI_ERC721, signer);
+        const bal = await c.balanceOf(account);
+        hasAccess = bal && ethers.BigNumber.from(bal).gt(0);
+      } else {
+        // ERC-1155: เช็กหลาย tokenId (ถ้า TOKEN_IDS ว่าง จะเตือนให้ระบุ หรือใช้ backend เพื่อตรวจรวมทั้งคอลเล็กชัน)
+        if (!TOKEN_IDS.length) {
+          alert("คอลเล็กชันนี้เป็น ERC-1155: โปรดกำหนด TOKEN_IDS เพื่อเช็กสิทธิ์ หรือย้ายตรวจกับ backend เพื่อรองรับทุกไอดี");
+        } else {
+          const c = new ethers.Contract(CONTRACT_ADDRESS, ABI_ERC1155, signer);
+          for (const id of TOKEN_IDS) {
+            const bal = await c.balanceOf(account, id);
+            if (bal && ethers.BigNumber.from(bal).gt(0)) { hasAccess = true; break; }
+          }
+        }
+      }
+
+      document.getElementById("locked").style.display = hasAccess ? "none" : "block";
+      document.getElementById("secret").style.display = hasAccess ? "block" : "none";
+      if (!hasAccess) alert("❌ ยังไม่มีสิทธิ์เข้าถึง (ยังไม่พบน้ำหนักการถือครอง)");
+    }
+
+    document.getElementById("connect").addEventListener("click", verifyAccess);
+  </script>
+</body>
+</html>
